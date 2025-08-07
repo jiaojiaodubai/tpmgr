@@ -1,0 +1,41 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+
+\title{Multi-Package Test Project}
+\author{tpmgr User}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Mathematical Content}
+Here we test multiple mathematical packages:
+
+\begin{align}
+    E &= mc^2 \\
+    \nabla \cdot \mathbf{E} &= \frac{\rho}{\epsilon_0} \\
+    \mathbb{R} &\subset \mathbb{C}
+\end{align}
+
+\section{Code Listings}
+Testing the listings package:
+
+\begin{lstlisting}[language=Rust, backgroundcolor=\color{gray!10}]
+fn main() {
+    println!("Hello, tpmgr!");
+}
+\end{lstlisting}
+
+\section{Hyperlinks}
+This document contains \href{https://ctan.org}{hyperlinks} to test the hyperref package.
+
+\section{Colors}
+Testing color support: \textcolor{red}{red text}, \textcolor{blue}{blue text}.
+
+\end{document}

@@ -1,0 +1,53 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# Build configuration and intermediate files  
+/build/**/*.exe
+/build/**/*.msi
+/build/**/*.wixpdb
+*.wixobj
+
+# Distribution artifacts (final packages)
+/dist/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE and editor files
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Log files
+*.log
+
+# Examples directory - ignore LaTeX intermediate and output files
+examples/**/*.aux
+examples/**/*.log
+examples/**/*.out
+examples/**/*.toc
+examples/**/*.nav
+examples/**/*.snm
+examples/**/*.bbl
+examples/**/*.blg
+examples/**/*.fdb_latexmk
+examples/**/*.fls
+examples/**/*.synctex.gz
+examples/**/*.pdf
+examples/**/.tpmgr
+examples/**/packages/
+examples/**/tpmgr.toml
+
+# Test artifacts and outputs
+test_output/
+*.test

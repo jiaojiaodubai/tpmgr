@@ -1,0 +1,33 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{natbib}
+\usepackage{hyperref}
+
+\title{Complex Compilation Chain Example}
+\author{tpmgr User}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+This project demonstrates tpmgr's compilation chain functionality, supporting multi-step compilation processes including BibTeX.
+
+\section{Literature Citations}
+According to research \citep{example2023}, LaTeX package management tools can significantly improve document writing efficiency.
+
+Another study \cite{smith2022} demonstrates the importance of automated tool chains for academic writing.
+
+\section{Conclusion}
+This document successfully demonstrates:
+\begin{itemize}
+    \item Multi-step compilation chain configuration
+    \item Usage of magic variables
+    \item Automatic package dependency detection
+\end{itemize}
+
+\bibliographystyle{plain}
+\bibliography{src/references}
+
+\end{document}

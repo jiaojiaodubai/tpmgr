@@ -1,0 +1,312 @@
+name: Build Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+      prerelease:
+        description: 'Mark as prerelease'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            name: windows
+            ext: .exe
+          - target: x86_64-apple-darwin
+            os: macos-14
+            name: macos
+            ext: ""
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            name: linux
+            ext: ""
+          - target: aarch64-apple-darwin
+            os: macos-14
+            name: macos-arm64
+            ext: ""
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install cross-compilation tools (Linux)
+      if: matrix.target == 'x86_64-unknown-linux-gnu'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-multilib build-essential
+
+    - name: Build binary
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Setup Windows build tools (Windows only)
+      if: matrix.name == 'windows'
+      run: |
+        # Check for Inno Setup  
+        if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+          Write-Host "✓ Inno Setup found"
+        } else {
+          Write-Host "Installing Inno Setup..."
+          choco install innosetup -y
+        }
+      shell: pwsh
+
+    - name: Build Windows installers (Windows only)
+      if: matrix.name == 'windows'
+      run: |
+        # Run the build script from build directory
+        Set-Location "build"
+        .\build-all.ps1
+        Set-Location ".."
+        
+        # List generated files
+        Get-ChildItem "dist\" -File | Format-Table Name, Length
+        
+        # Generate SHA256 checksums
+        $files = Get-ChildItem "dist\tpmgr-*.*" -File
+        $out = "dist\SHA256SUMS.txt"
+        if (Test-Path $out) { Remove-Item $out -Force }
+        foreach ($f in $files) {
+          $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash
+          "$hash  $($f.Name)" | Out-File -FilePath $out -Append -Encoding ascii
+        }
+      shell: pwsh
+
+    - name: Create Unix archive
+      if: matrix.name != 'windows'
+      run: |
+        version="${{ github.event.inputs.version }}"
+        archive_name="tpmgr-${version}-${{ matrix.name }}"
+        
+        mkdir -p $archive_name
+        cp target/${{ matrix.target }}/release/tpmgr${{ matrix.ext }} $archive_name/
+        cp README.md README_zh.md LICENSE $archive_name/
+        
+        # Create install script
+        cat > $archive_name/install.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        INSTALL_DIR="/usr/local/bin"
+        BINARY_NAME="tpmgr"
+        
+        echo "Installing tpmgr..."
+        
+        if [[ "$EUID" -eq 0 ]]; then
+            cp "$BINARY_NAME" "$INSTALL_DIR/"
+            chmod +x "$INSTALL_DIR/$BINARY_NAME"
+            echo "✓ tpmgr installed to $INSTALL_DIR"
+        else
+            echo "For system-wide installation, run with sudo:"
+            echo "  sudo ./install.sh"
+            echo ""
+            echo "For user installation:"
+            mkdir -p "$HOME/.local/bin"
+            cp "$BINARY_NAME" "$HOME/.local/bin/"
+            chmod +x "$HOME/.local/bin/$BINARY_NAME"
+            echo "✓ tpmgr installed to $HOME/.local/bin"
+            echo "Make sure $HOME/.local/bin is in your PATH"
+        fi
+        
+        echo "Installation complete! Test with: tpmgr --help"
+        EOF
+        
+        chmod +x $archive_name/install.sh
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          tar --owner=0 --group=0 --numeric-owner -czf "${archive_name}.tar.gz" "$archive_name"/
+        else
+          # BSD tar (macOS) doesn't support --owner/--group flags
+          tar -czf "${archive_name}.tar.gz" "$archive_name"/
+        fi
+        rm -rf $archive_name
+        
+        # Generate SHA256 checksum (portable across Linux/macOS)
+        if command -v sha256sum >/dev/null 2>&1; then
+          sha256sum ${archive_name}.tar.gz > ${archive_name}.tar.gz.sha256
+        else
+          shasum -a 256 ${archive_name}.tar.gz > ${archive_name}.tar.gz.sha256
+        fi
+
+    - name: Upload Windows Inno Setup Installer
+      if: matrix.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: tpmgr-${{ github.event.inputs.version }}-setup.exe
+        path: dist/tpmgr-*-setup.exe
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 7
+
+    - name: Upload Windows Portable
+      if: matrix.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: tpmgr-${{ github.event.inputs.version }}-portable.zip
+        path: dist/tpmgr-*-portable.zip
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 7
+
+    - name: Upload Windows checksums
+      if: matrix.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: tpmgr-${{ github.event.inputs.version }}-windows-sha256.txt
+        path: dist/SHA256SUMS.txt
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 7
+
+    - name: Upload Unix archive
+      if: matrix.name != 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: tpmgr-${{ github.event.inputs.version }}-${{ matrix.name }}.tar.gz
+        path: tpmgr-${{ github.event.inputs.version }}-${{ matrix.name }}.tar.gz
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 7
+
+    - name: Upload Unix checksum
+      if: matrix.name != 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: tpmgr-${{ github.event.inputs.version }}-${{ matrix.name }}.tar.gz.sha256
+        path: tpmgr-${{ github.event.inputs.version }}-${{ matrix.name }}.tar.gz.sha256
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-24.04
+    if: success()
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        pattern: '*'
+        merge-multiple: true
+
+    - name: Display structure of downloaded files
+      run: ls -la artifacts/
+
+    - name: Publish GitHub Release (stable action)
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.event.inputs.version }}
+        name: tpmgr ${{ github.event.inputs.version }}
+        body: |
+          ## 🚀 tpmgr ${{ github.event.inputs.version }}
+
+          ### 📦 安装方式 / Installation Methods
+
+          #### Windows 用户 / Windows Users
+          
+          **方式一：Inno Setup安装程序 (推荐) / Method 1: Inno Setup Installer (Recommended):**
+          - 下载 `tpmgr-${{ github.event.inputs.version }}-setup.exe` 并双击安装
+          - Download `tpmgr-${{ github.event.inputs.version }}-setup.exe` and double-click to install
+          
+          **方式二：便携版 / Method 2: Portable:**
+          - 下载 `tpmgr-${{ github.event.inputs.version }}-portable.zip` 并解压
+          - Download `tpmgr-${{ github.event.inputs.version }}-portable.zip` and extract
+          
+          **方式三：远程安装 / Method 3: Remote Installation:**
+          ```powershell
+          # 一键安装最新版本 / One-click install latest version
+          iwr -useb https://raw.githubusercontent.com/jiaojiaodubai/tpmgr/master/install-remote.ps1 | iex
+          
+          # 或下载脚本后运行 / Or download and run script
+          curl -O https://raw.githubusercontent.com/jiaojiaodubai/tpmgr/master/install-remote.ps1
+          .\install-remote.ps1 -Help
+          ```
+
+          #### macOS 用户 / macOS Users
+          
+          ```bash
+          # 下载并安装 / Download and install
+          curl -L https://github.com/jiaojiaodubai/tpmgr/releases/download/${{ github.event.inputs.version }}/tpmgr-${{ github.event.inputs.version }}-macos.tar.gz | tar xz
+          cd tpmgr-${{ github.event.inputs.version }}-macos
+          ./install.sh
+          ```
+
+          #### Linux 用户 / Linux Users
+          
+          ```bash
+          # 下载并安装 / Download and install
+          curl -L https://github.com/jiaojiaodubai/tpmgr/releases/download/${{ github.event.inputs.version }}/tpmgr-${{ github.event.inputs.version }}-linux.tar.gz | tar xz
+          cd tpmgr-${{ github.event.inputs.version }}-linux
+          ./install.sh
+          ```
+
+          ### 🔧 快速开始 / Quick Start
+
+          ```bash
+          # 初始化项目 / Initialize project
+          tpmgr init my-paper
+          cd my-paper
+
+          # 安装包 / Install packages
+          tpmgr install amsmath geometry hyperref
+
+          # 编译项目 / Compile project
+          tpmgr compile
+          ```
+
+          ### 📚 文档 / Documentation
+          
+          - [中文文档](https://github.com/jiaojiaodubai/tpmgr/blob/main/README_zh.md)
+          - [English Documentation](https://github.com/jiaojiaodubai/tpmgr/blob/main/README.md)
+        draft: false
+        prerelease: ${{ github.event.inputs.prerelease }}
+        files: |
+          artifacts/**/*
